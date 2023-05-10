@@ -18,10 +18,13 @@ h = -1e5  # [W/m**2]
 
 thickness = [0.001] # [m]
 t = thickness[0]
+
+alpha_c = 40 # [W/(m^2K)]
 # Definie Geometry
 
 # Mesh markers
-HEAT_FLUX_BOUNDARY = 2
+HEAT_FLUX_BOUNDARY = 6
+CONVECTION_BOUNDARY = 8
 
 def define_geometry():
     L = 0.005 # [m]
@@ -44,8 +47,11 @@ def define_geometry():
     for xp, yp in points:
         g.point([xp, yp])
 
+
     for s in [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5],  # 0-4
-               [5, 6], [6, 7], [7, 8], [8, 9], [9, 10],  # 5-9
+               [5, 6], [6, 7], [7, 8], [8, 9], [9, 10]]:
+        g.spline(s, marker=CONVECTION_BOUNDARY)
+    for s in [ # 5-9
                [10, 11], [11, 12], [12, 13], [13, 14], [14, 15],  # 10-14
                [15, 16], [16, 17], [17, 18]]:
         g.spline(s)
@@ -80,40 +86,79 @@ for eldof, elx, ely, materialindex in zip(edof, ex, ey, elementmarkers):
     Ke = cfc.flw2te(elx, ely, thickness, D_cu if materialindex == 1 else D_ny)
     cfc.assem(eldof, K, Ke)
 
-node_lists = []
-for b in boundary_elements[HEAT_FLUX_BOUNDARY]:
-    node_lists.append(b.get("node-number-list"))
 
 
 f_h = np.zeros([np.size(dofs), 1])
 
-for node_pair in node_lists:
-    r1 = None
-    r1_dof_index = None
-    r2 = None
-    r2_dof_index = None
-    for i, (coord, dof) in enumerate(zip(coords, dofs)):
-        if dof == node_pair[0]:
-            r1 = coord
-            r1_dof_index = i
-        if dof == node_pair[1]:
-            r2 = coord
-            r2_dof_index = i
-    
-    distance = np.linalg.norm(np.array(r1) - np.array(r2))
+def N_transpose(node_pair_list, f_sub, factor):
+    for node_pair in node_pair_list:
+        r1 = None
+        r1_dof_index = None
+        r2 = None
+        r2_dof_index = None
+        for i, (coord, dof) in enumerate(zip(coords, dofs)):
+            if dof == node_pair[0]:
+                r1 = coord
+                r1_dof_index = i
+            if dof == node_pair[1]:
+                r2 = coord
+                r2_dof_index = i
+        
+        distance = np.linalg.norm(np.array(r1) - np.array(r2))
+        print(h)
+        f_sub[r1_dof_index] += factor * distance
+        f_sub[r2_dof_index] += factor * distance
 
-    f_h[r1_dof_index] = -h*t * distance * 1/2
-    f_h[r2_dof_index] = -h*t * distance * 1/2
+def N_N_transpose(node_pair_list, k_sub):
+    for node_pair in node_pair_list:
+        r1 = None
+        r1_dof_index = None
+        r2 = None
+        r2_dof_index = None
+        for i, (coord, dof) in enumerate(zip(coords, dofs)):
+            if dof == node_pair[0]:
+                r1 = coord
+                r1_dof_index = i
+            if dof == node_pair[1]:
+                r2 = coord
+                r2_dof_index = i
+        
+        distance = np.linalg.norm(np.array(r1) - np.array(r2))
+        print(distance)
+        k_sub[r1_dof_index][r1_dof_index] += 1/3 * alpha_c * t * distance
+        k_sub[r2_dof_index][r2_dof_index] += 1/3 * alpha_c * t * distance
+        k_sub[r1_dof_index][r2_dof_index] += 1/6 * alpha_c * t * distance
+        k_sub[r2_dof_index][r1_dof_index] += 1/6 * alpha_c * t * distance
 
 
+
+node_lists = []
+for b in boundary_elements[HEAT_FLUX_BOUNDARY]:
+    node_lists.append(b.get("node-number-list"))
+N_transpose(node_lists, f_h, -h*t * 1/2)
+print(f_h)
+f_c = np.zeros([np.size(dofs), 1])
+
+node_lists_conv = []
+for b in boundary_elements[CONVECTION_BOUNDARY]:
+    node_lists_conv.append(b.get("node-number-list"))
+N_transpose(node_lists_conv, f_c, T_inf * alpha_c * t)
+# print(f_c)
+
+K_sub = np.zeros((np.size(dofs), np.size(dofs)))
+N_N_transpose(node_lists_conv, K_sub)
+cfv.figure(fig_size=(10, 10))
+cfv.plt.spy(K_sub)
+K += K_sub
 
 bc = np.array([], 'i')
 bc_val = np.array([], 'i')
 
-cfv.draw_mesh(coords, edof, 1, 2)
+# cfv.draw_mesh(coords, edof, 1, 2)
 
-f = f_h
-a, r = cfc.solveq(K, f, np.array(bdofs.get(0)), np.array(bdofs.get(0))* 0 + T_inf)
+f = f_h + f_c
+
+a = np.linalg.solve(K, f)
 
 cfv.figure(fig_size=(10, 10))
 cfv.draw_nodal_values_shaded(a, coords, edof, title="Temperature",
