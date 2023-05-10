@@ -12,6 +12,9 @@ D_cu=np.diag([k_cu,k_cu])
 k_ny=0.26# [W/(mK)]
 D_ny=np.diag([k_ny,k_ny])
 
+Tinf=18 #[C]
+h=1e5 #[W/m**2]
+
 # Definie Geometry
 def define_geometry():   
     L = 0.005
@@ -37,13 +40,36 @@ def define_geometry():
     splines = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5],  # 0-4
             [5, 6], [6, 7], [7, 8], [8, 9], [9, 10],  # 5-9
             [10, 11], [11, 12], [12, 13], [13, 14], [14, 15],  # 10-14
-            [15, 16], [16, 17], [17, 0], [18, 17], [18, 11]]
+            [15, 16], [16, 17], [17, 0], [18, 17], [18, 11]] 
 
     for s in splines:
         g.spline(s)
     g.surface(list(range(0,18)),marker=1)
-    g.surface(list(range(11,17))+list(range(18,21)),marker=2)
+    g.surface(list(range(11,17))+list(range(18,20)),marker=2)
+
+    
     return g
 
-cfv.draw_geometry(define_geometry(), draw_points=True, label_curves=True, label_points=True)
+def generate_mesh(g,dof=1):
+    mesh=cfm.GmshMesh(g,2,dof)
+    return mesh.create()
+g = define_geometry()
+cfv.draw_geometry(g)
+
+coords, edof, dofs, bdofs, elementmarkers = generate_mesh(g)
+ex, ey = cfc.coord_extract(edof,coords,dofs)
+
+K=np.zeros((np.size(dofs),np.size(dofs)))
+thickness=np.array([0.001])
+
+
+for eldof, elx, ely, materialindex in zip(edof, ex, ey, elementmarkers):
+    Ke=cfc.flw2te(elx,ely, thickness, D_cu if materialindex==1 else D_ny)
+    cfc.assem(eldof,K,Ke)
+print(K)
+
+cfv.draw_mesh(coords, edof, 1,2)
+
+
+
 cfv.showAndWait()
