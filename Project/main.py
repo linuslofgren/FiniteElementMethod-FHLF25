@@ -26,6 +26,9 @@ alpha_c = 40 # [W/(m^2K)]
 HEAT_FLUX_BOUNDARY = 6
 CONVECTION_BOUNDARY = 8
 
+COPPER_SURFACE = 1
+NYLON_SURFACE = 2
+
 def define_geometry():
     L = 0.005 # [m]
     a = 0.1*L
@@ -62,8 +65,8 @@ def define_geometry():
     for s in [[17, 19], [19, 11]]:
         g.spline(s)
 
-    g.surface(list(range(0, 19)), marker=1)
-    g.surface([11, 12, 13, 14, 15, 16, 19, 20], marker=2)
+    g.surface(list(range(0, 19)), marker=COPPER_SURFACE)
+    g.surface([11, 12, 13, 14, 15, 16, 19, 20], marker=NYLON_SURFACE)
 
     return g
 
@@ -75,15 +78,15 @@ def generate_mesh(g, dof=1):
 
 
 g = define_geometry()
-cfv.draw_geometry(g)
+# cfv.draw_geometry(g)
 
 
-coords, edof, dofs, bdofs, elementmarkers, boundary_elements = generate_mesh(g)
+coords, edof, dofs, bdofs, element_markers, boundary_elements = generate_mesh(g)
 ex, ey = cfc.coord_extract(edof, coords, dofs)
 
 K = np.zeros((np.size(dofs), np.size(dofs)))
-for eldof, elx, ely, materialindex in zip(edof, ex, ey, elementmarkers):
-    Ke = cfc.flw2te(elx, ely, thickness, D_cu if materialindex == 1 else D_ny)
+for eldof, elx, ely, material_index in zip(edof, ex, ey, element_markers):
+    Ke = cfc.flw2te(elx, ely, thickness, D_cu if material_index == COPPER_SURFACE else D_ny)
     cfc.assem(eldof, K, Ke)
 
 
@@ -148,7 +151,7 @@ N_transpose(node_lists_conv, f_c, T_inf * alpha_c * t)
 K_sub = np.zeros((np.size(dofs), np.size(dofs)))
 N_N_transpose(node_lists_conv, K_sub)
 cfv.figure(fig_size=(10, 10))
-cfv.plt.spy(K_sub)
+# cfv.plt.spy(K_sub)
 K += K_sub
 
 bc = np.array([], 'i')
@@ -158,10 +161,69 @@ bc_val = np.array([], 'i')
 
 f = f_h + f_c
 
-a = np.linalg.solve(K, f)
+a_stat = np.linalg.solve(K, f)
 
-cfv.figure(fig_size=(10, 10))
-cfv.draw_nodal_values_shaded(a, coords, edof, title="Temperature",
-                            dofs_per_node=1, el_type=2, draw_elements=True)
-cfv.colorbar()
-cfv.showAndWait()
+max_temp=np.amax(a_stat)
+
+print(a_stat.shape)
+# cfv.figure(fig_size=(10, 10))
+# cfv.draw_nodal_values_shaded(a, coords, edof, title="Temperature",
+#                             dofs_per_node=1, el_type=2, draw_elements=True)
+
+# MARK: Del B let's go!!!
+
+from plantml import plantml
+
+rho_cu = 8930 # [kg/m^3]
+rho_ny = 1100 # [kg/m^3]
+
+c_p_cu = 386 # [J/(kgK)]
+c_p_ny = 1500 # [J/(kgK)]
+
+C = np.zeros((np.size(dofs), np.size(dofs)))
+for eldof, elx, ely, material_index in zip(edof, ex, ey, element_markers):
+    Ce = plantml(elx, ely, (rho_cu * c_p_cu) if material_index == COPPER_SURFACE else (rho_ny * c_p_ny))
+    cfc.assem(eldof, C, Ce)
+
+
+theta = 1.0
+delta_t = 1
+
+a = np.full(dofs.shape, 18)
+print(a.shape)
+from time import sleep
+import matplotlib.pyplot as plt
+
+# cfv.figure(fig_size=(10, 10))
+# cfv.show()
+print("a shape", a.shape)
+for _ in np.arange(0, 80000, delta_t):
+    # print("No shift, right", ((C-delta_t*K*(1-theta))@a).shape)
+    # print("No shift (f)", (delta_t*f).shape)
+    # print("No shift (big)", (delta_t*f+(C-delta_t*K*(1-theta))@a).shape)
+# f_shift = f.flatten()
+# print("With shift (f)", f_shift.shape)
+# print("With shift (big)", (delta_t*f_shift+(C-delta_t*K*(1-theta))@a).shape)
+    A = C+delta_t*theta*K
+    b = delta_t*f+(C-delta_t*K*(1-theta))@a
+    a = np.linalg.solve(A, b)
+    print("C-delta", ((C-delta_t*K*(1-theta))@a).shape)
+    print("f", f.shape)
+    print("A", A.shape)
+    print("b", b.shape)
+    print("a", a.shape)
+    # cfv.draw_nodal_values_shaded(a, coords, edof, title="Temperature",
+    #                         dofs_per_node=1, el_type=2, draw_elements=True)
+    # cfv.colorbar()
+    # plt.show(block=False)
+    # plt.pause(0.2)
+    # plt.close()
+    # cfv.gcf().canvas.draw()
+    # cfv.canvas.draw()
+
+    # cfv.gcf().canvas.flush_events()
+    # sleep(0)
+    # plt.close()
+
+print(np.amax(a_stat-a))
+# cfv.show_and_wait()
