@@ -38,7 +38,7 @@ class ClampingProblem:
             ClampingProblem.NYLON: IsomorphicMaterial(0.26, 3e9, 0.39, 80e-6, "Nylon")
         }
         self.T_inf = 18  # [C]
-        self.T_0 = 18  # [C]
+        self.T_0 = 18 # [C]
         self.h = -1e5  # [W/m**2]
         self.thickness = [0.005]  # [m]
         self.alpha_c = 40  # [W/(m^2K)]
@@ -86,7 +86,7 @@ class ClampingProblem:
         for xp, yp in points:
             g.point([xp, yp])
 
-        NUM = 10
+        NUM = 4
 
         for s in [[0, 1]]:
             g.spline(s, marker=ClampingProblem.Y_FIXED_BOUNDARY, el_on_curve=NUM)
@@ -200,7 +200,7 @@ class ClampingProblem:
         node_lists_conv = list(map(itemgetter(
             "node-number-list"), self.boundary_elements[ClampingProblem.CONVECTION_BOUNDARY]))
         self.N_transpose(node_lists_conv, f, self.T_inf *
-                         self.alpha_c * self.thickness[0])
+                         self.alpha_c * self.thickness[0] * 1/2)
 
         # MARK: Sida 220
         K_c = np.zeros((np.size(self.dofs), np.size(self.dofs)))
@@ -239,24 +239,22 @@ class ClampingProblem:
         theta = 1.0
         delta_t = 0.05
 
-        a = np.full(self.dofs.shape, 18)
+        a = np.full(self.dofs.shape, self.T_0)
 
         total_time = 0
         time_90_perc = None
-        for _ in np.arange(0, 100, delta_t):
+        while np.amax(a) < ((np.amax(a_stat)-self.T_0) * 0.9)+self.T_0:
             A = C+delta_t*theta*K
             b = delta_t*f+(C-delta_t*K*(1-theta))@a
             a = np.linalg.solve(A, b)
             total_time += delta_t
-            if np.amax(a) >= np.amax(a_stat) * 0.9:
-                print(f"total time to 90% {total_time:.2f} seconds")
-                time_90_perc = total_time
-                break
-
+        
+        print(f"total time to 90% {total_time:.2f} seconds")
+        time_90_perc = total_time
         time_3_perc = 0.03 * time_90_perc
         time_step = (time_3_perc / 4)
 
-        a = np.full(self.dofs.shape, 18)
+        a = np.full(self.dofs.shape, self.T_0)
 
         total_time = 0
         time_90_perc = None
@@ -291,15 +289,17 @@ class ClampingProblem:
             cfv.colorbar()
 
 
-        
         cfv.show_and_wait()
-    def solve_displacement(self):
+    def solve_displacement(self, temp_values=None):
 
         # MARK: Del C (plane strain)
 
         ex, ey = cfc.coord_extract(self.edof, self.coords, self.dofs)
 
-        a_stat, _, _ = self.solve_static()
+        if temp_values is None:
+            a_stat, _, _ = self.solve_static()
+        else:
+            a_stat = temp_values
 
         # Create new degrees of freedom
         stress_edof = np.full((self.edof.shape[0], self.edof.shape[1]*2), 0)
@@ -378,7 +378,7 @@ class ClampingProblem:
             v = self.materials[material_index].v
             alpha = self.materials[material_index].alpha
             # Determine element stresses and strains in the element.
-            dt = np.mean(a_stat[temp_edof-1]) - self.T_inf
+            dt = np.mean(a_stat[temp_edof-1]) - self.T_0
 
             # MARK: This is probably wrong, se sida 255
             D = cfc.hooke(ptype, E, v)
@@ -386,14 +386,15 @@ class ClampingProblem:
             sigx -= alpha*E*dt/(1-2*v)
             sigy -= alpha*E*dt/(1-2*v)
 
-            # sigz -= alpha*E*dt/(1-2*v)
+            sigz -= alpha*E*dt/(1-2*v)
+            # sigz = v*(sigx + sigy) - (alpha * E * dt)
 
             stress = (sigx**2+sigy**2+sigz**2-sigx *
                       sigy-sigx*sigz+3*tauxy**2)**(1/2)
 
             von_mises.append(stress)
 
-        magnification = 1.0
+        magnification = 10.0
 
         cfv.figure(fig_size=(10, 10))
         
