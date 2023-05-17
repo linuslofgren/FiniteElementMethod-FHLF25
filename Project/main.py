@@ -15,7 +15,7 @@ class IsomorphicMaterial:
     def __init__(self, k, E, v, alpha, name=None) -> None:
         self.k = k  # [W/(mK)]
         self.D = np.diag([k, k])
-        self.E = E  # [GPa]
+        self.E = E  # [Pa]
         self.v = v
         self.alpha = alpha
         self.name = name
@@ -34,8 +34,8 @@ class ClampingProblem:
 
     def __init__(self, L=0.005) -> None:
         self.materials = {
-            ClampingProblem.COPPER: IsomorphicMaterial(385, 128, 0.36, 17.6e-6, "Copper"),
-            ClampingProblem.NYLON: IsomorphicMaterial(0.26, 3, 0.39, 80e-6, "Nylon")
+            ClampingProblem.COPPER: IsomorphicMaterial(385, 128e9, 0.36, 17.6e-6, "Copper"),
+            ClampingProblem.NYLON: IsomorphicMaterial(0.26, 3e9, 0.39, 80e-6, "Nylon")
         }
         self.T_inf = 18  # [C]
         self.T_0 = 18  # [C]
@@ -86,7 +86,7 @@ class ClampingProblem:
         for xp, yp in points:
             g.point([xp, yp])
 
-        NUM = None
+        NUM = 10
 
         for s in [[0, 1]]:
             g.spline(s, marker=ClampingProblem.Y_FIXED_BOUNDARY, el_on_curve=NUM)
@@ -386,7 +386,7 @@ class ClampingProblem:
             sigx -= alpha*E*dt/(1-2*v)
             sigy -= alpha*E*dt/(1-2*v)
 
-            sigz = E*v/((1+v)*(1-2*v))*(epsx+epsy)-alpha*E*dt/(1-2*v)
+            # sigz -= alpha*E*dt/(1-2*v)
 
             stress = (sigx**2+sigy**2+sigz**2-sigx *
                       sigy-sigx*sigz+3*tauxy**2)**(1/2)
@@ -400,22 +400,22 @@ class ClampingProblem:
         flip_y = np.array([([1, -1]*int(a.size/2))]).T
         flip_x = np.array([([-1, 1]*int(a.size/2))]).T
         cfv.draw_element_values(von_mises, self.coords, stress_edof, 2, 2, a,
-                                draw_elements=True, draw_undisplaced_mesh=True,
+                                draw_elements=False, draw_undisplaced_mesh=True,
                                 title="Effective Stress", magnfac=magnification)
         cfv.draw_element_values(von_mises, [0, self.L]+[1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y, a),
-                                draw_elements=True, draw_undisplaced_mesh=True,
+                                draw_elements=False, draw_undisplaced_mesh=True,
                                 title="Effective Stress", magnfac=magnification)
         cfv.draw_element_values(von_mises, [2*self.L, self.L]+[-1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y*flip_x, a),
-                                draw_elements=True, draw_undisplaced_mesh=True,
+                                draw_elements=False, draw_undisplaced_mesh=True,
                                 title="Effective Stress", magnfac=magnification)
         cfv.draw_element_values(von_mises, [2*self.L, 0]+[-1, 1]*self.coords, stress_edof, 2, 2, np.multiply(flip_x, a),
-                                draw_elements=True, draw_undisplaced_mesh=True,
+                                draw_elements=False, draw_undisplaced_mesh=True,
                                 title="Effective Stress", magnfac=magnification)
         cfv.colorbar()
         cfv.show_and_wait()
 
 if __name__ == "__main__":
     problem = ClampingProblem()
-    problem.solve_static()
-    problem.solve_transient()
+    # problem.solve_static()
+    # problem.solve_transient()
     problem.solve_displacement()
