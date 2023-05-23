@@ -1,13 +1,13 @@
 import calfem.geometry as cfg
 import calfem.mesh as cfm
 
+
 class ClampingBoundaryKeys:
     HEAT_FLUX_BOUNDARY = 6
     CONVECTION_BOUNDARY = 8
     FIXED_BOUNDARY = 10
     X_FIXED_BOUNDARY = 11
     Y_FIXED_BOUNDARY = 12
-
 
 
 class ClampingMaterialKeys:
@@ -57,19 +57,19 @@ def gripper_geometry(L):
         g.spline(s, marker=ClampingBoundaryKeys.Y_FIXED_BOUNDARY, el_on_curve=NUM)
 
     for s in [[1, 2], [2, 3], [3, 4], [4, 5],
-                [5, 6], [6, 7]]:
+              [5, 6], [6, 7]]:
         g.spline(s, marker=ClampingBoundaryKeys.CONVECTION_BOUNDARY,
-                    el_on_curve=NUM)
+                 el_on_curve=NUM)
 
     for s in [[7, 8]]:
         g.spline(s, marker=ClampingBoundaryKeys.X_FIXED_BOUNDARY, el_on_curve=NUM)
 
     for s in [[8, 9], [9, 10]]:
         g.spline(s, marker=ClampingBoundaryKeys.CONVECTION_BOUNDARY,
-                    el_on_curve=NUM)
+                 el_on_curve=NUM)
 
     for s in [[10, 11], [11, 12], [12, 13], [13, 14], [14, 15],
-            [15, 16], [16, 17]]:
+              [15, 16], [16, 17]]:
         g.spline(s, el_on_curve=NUM)
 
     for s in [[17, 18]]:
@@ -77,7 +77,7 @@ def gripper_geometry(L):
 
     for s in [[18, 0]]:
         g.spline(s, marker=ClampingBoundaryKeys.HEAT_FLUX_BOUNDARY,
-                    el_on_curve=NUM)
+                 el_on_curve=NUM)
 
     for s in [[17, 19]]:
         g.spline(s, marker=ClampingBoundaryKeys.FIXED_BOUNDARY, el_on_curve=NUM)
@@ -85,17 +85,18 @@ def gripper_geometry(L):
     for s in [[19, 11]]:
         g.spline(s, el_on_curve=NUM)
 
-
     print(ClampingMaterialKeys.COPPER)
     g.surface(list(range(0, 19)), marker=ClampingMaterialKeys.COPPER)
     g.surface(list(set(range(11, 21)) - set([17, 18])),
-                marker=ClampingMaterialKeys.NYLON)
+              marker=ClampingMaterialKeys.NYLON)
 
     return g
 
-def gripper_mesh(L, geometry, el_type, dof=1):
+
+def gripper_mesh(L, el_type, dof=1, size_factor=None):
     geometry = gripper_geometry(L)
     mesh = cfm.GmshMesh(geometry, el_type, dof)
     mesh.return_boundary_elements = True
-    mesh.el_size_factor = 0.02
+    if size_factor is not None:
+        mesh.el_size_factor = size_factor
     return mesh.create()
