@@ -86,7 +86,7 @@ class ClampingProblem:
         for xp, yp in points:
             g.point([xp, yp])
 
-        NUM = 4
+        NUM = 2
 
         for s in [[0, 1]]:
             g.spline(s, marker=ClampingProblem.Y_FIXED_BOUNDARY, el_on_curve=NUM)
@@ -178,8 +178,12 @@ class ClampingProblem:
             k_sub[r2_dof_index][r1_dof_index] += 1/6 * \
                 self.alpha_c * self.thickness[0] * distance
 
-    def solve_static(self):
-        cfv.draw_geometry(self.geometry)
+    def solve_static(self, show_figure=False):
+        # cfv.draw_geometry(self.geometry)
+        if show_figure:
+            plt.xlabel("x (m)")
+            plt.ylabel("y (m)")
+            cfv.draw_mesh(self.coords, self.edof, 1, 2)
 
         ex, ey = cfc.coord_extract(self.edof, self.coords, self.dofs)
 
@@ -192,13 +196,17 @@ class ClampingProblem:
         f = np.zeros([np.size(self.dofs), 1])
 
         # Add f_h
-        node_lists = node_lists_conv = list(map(itemgetter(
-            "node-number-list"), self.boundary_elements[ClampingProblem.HEAT_FLUX_BOUNDARY]))
+        node_lists = node_lists_conv = list(map(
+            itemgetter("node-number-list"),
+            self.boundary_elements[ClampingProblem.HEAT_FLUX_BOUNDARY]
+        ))
         self.N_transpose(node_lists, f, -self.h*self.thickness[0] * 1/2)
 
         # Add f_c
-        node_lists_conv = list(map(itemgetter(
-            "node-number-list"), self.boundary_elements[ClampingProblem.CONVECTION_BOUNDARY]))
+        node_lists_conv = list(map(
+            itemgetter("node-number-list"),
+            self.boundary_elements[ClampingProblem.CONVECTION_BOUNDARY]
+        ))
         self.N_transpose(node_lists_conv, f, self.T_inf *
                          self.alpha_c * self.thickness[0] * 1/2)
 
@@ -211,7 +219,30 @@ class ClampingProblem:
 
         max_temp = np.amax(a_stat)
 
-        print(f"Maximum temperature {max_temp:.2f} (C)")
+        print(f"Maximum temperature {max_temp:.2f} (°C)")
+
+
+        if show_figure:
+            cfv.figure(fig_size=(10, 10))
+            cfv.draw_nodal_values_shaded(a_stat, self.coords, self.edof, title=(f"Max temp {np.amax(a_stat):.2f} (C)"),
+                                    dofs_per_node=1, el_type=2, draw_elements=True)
+            cfv.draw_nodal_values_shaded(a_stat, [0, self.L]+[1, -1]*self.coords, self.edof, title=(f"Max temp {np.amax(a_stat):.2f} (C)"),
+                                    dofs_per_node=1, el_type=2, draw_elements=True)
+            cfv.draw_nodal_values_shaded(a_stat, [2*self.L, self.L]+[-1, -1]*self.coords, self.edof, title=(f"Max temp {np.amax(a_stat):.2f} (C)"),
+                                    dofs_per_node=1, el_type=2, draw_elements=True)
+            cfv.draw_nodal_values_shaded(a_stat, [2*self.L, 0]+[-1, 1]*self.coords, self.edof, title=(f"Max temp {np.amax(a_stat):.2f} (C)"),
+                                    dofs_per_node=1, el_type=2, draw_elements=True)
+            cfv.draw_nodal_values_shaded(a_stat, [2*self.L, 0]+[-1, 1]*self.coords, self.edof, title=(f"Maximum temperature {np.amax(a_stat):.2f} °C"),
+                                    dofs_per_node=1, el_type=2, draw_elements=True)
+            
+            cfv.colorbar()
+            plt.xlabel("x (m)")
+            plt.ylabel("y (m)")
+            for c in cfv.gca().collections:
+                
+                if c.colorbar:
+                    c.colorbar.set_label('Temperature (°C)', rotation=270, labelpad=20)
+            cfv.show_and_wait()
 
         return a_stat, K, f
 
@@ -261,10 +292,12 @@ class ClampingProblem:
         time_step_index = 0
 
         snapshots = []
+        snapshot_time = []
         for _ in np.arange(0, 100, delta_t):
             if total_time >= time_step_index * time_step:
                 time_step_index += 1
                 snapshots.append(a)
+                snapshot_time.append(total_time)
 
             if time_step_index == 5:
                 break
@@ -273,22 +306,36 @@ class ClampingProblem:
             a = np.linalg.solve(A, b)
             total_time += delta_t
 
-
-        for snapshot in reversed(snapshots):
-            cfv.figure(fig_size=(10, 10))
+        fig, axes  = plt.subplots(3,2)
+        fig.tight_layout()
+        axes.flatten()[-1].axis('off')
+        # vmax = np.max(a_stat)
+        vmax = np.max(snapshots[-1])
+        for snapshot, time, ax in zip(snapshots, snapshot_time, axes.flatten()):
+            plt.sca(ax)
+            plt.xlabel("x (m)")
+            plt.ylabel("y (m)")
+            
+            # cfv.figure(fig, fig_size=(10, 10))
             cfv.draw_nodal_values_shaded(snapshot, self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
-                                    dofs_per_node=1, el_type=2, draw_elements=True)
+                                    dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
             cfv.draw_nodal_values_shaded(snapshot, [0, self.L]+[1, -1]*self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
-                                    dofs_per_node=1, el_type=2, draw_elements=True)
+                                    dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
             cfv.draw_nodal_values_shaded(snapshot, [2*self.L, self.L]+[-1, -1]*self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
-                                    dofs_per_node=1, el_type=2, draw_elements=True)
+                                    dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
             cfv.draw_nodal_values_shaded(snapshot, [2*self.L, 0]+[-1, 1]*self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
-                                    dofs_per_node=1, el_type=2, draw_elements=True)
-            cfv.draw_nodal_values_shaded(snapshot, [2*self.L, 0]+[-1, 1]*self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
-                                    dofs_per_node=1, el_type=2, draw_elements=True)
-            cfv.colorbar()
+                                    dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
+            cfv.draw_nodal_values_shaded(snapshot, [2*self.L, 0]+[-1, 1]*self.coords, self.edof, title=(f"t={time:.2f}s, max temp {np.amax(snapshot):.2f} °C"),
+                                    dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
 
 
+        fig.subplots_adjust(right=0.8)
+        plt.colorbar(ax=axes.ravel().tolist())
+        
+        for c in cfv.gca().collections:
+            
+            if c.colorbar:
+                c.colorbar.set_label('Temperature (°C)', rotation=270, labelpad=20)
         cfv.show_and_wait()
     def solve_displacement(self, temp_values=None):
 
@@ -411,12 +458,18 @@ class ClampingProblem:
                                 title="Effective Stress", magnfac=magnification)
         cfv.draw_element_values(von_mises, [2*self.L, 0]+[-1, 1]*self.coords, stress_edof, 2, 2, np.multiply(flip_x, a),
                                 draw_elements=False, draw_undisplaced_mesh=True,
-                                title="Effective Stress", magnfac=magnification)
+                                title="Effective stress and displacement", magnfac=magnification)
         cfv.colorbar()
+        plt.xlabel("x (m)")
+        plt.ylabel("y (m)")
+        for c in cfv.gca().collections:
+            
+            if c.colorbar:
+                c.colorbar.set_label('von Mises stress (Pa)', rotation=270, labelpad=20)
         cfv.show_and_wait()
 
 if __name__ == "__main__":
     problem = ClampingProblem()
-    # problem.solve_static()
+    # problem.solve_static(show_figure=True)
     # problem.solve_transient()
     problem.solve_displacement()
