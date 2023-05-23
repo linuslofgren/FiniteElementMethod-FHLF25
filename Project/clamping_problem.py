@@ -132,7 +132,7 @@ class ClampingProblem:
         snapshots = [a]
         snapshot_time = [total_time]
 
-        # Advance time until at 90% of maximum temperature
+        # Advance time until at 90% of maximum temperature increase
         while np.amax(a) < ((np.amax(a_stat)-self.T_0) * 0.9)+self.T_0:
             # Solve the heat problem as stated above
             A = C+delta_t*theta*K
