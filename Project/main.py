@@ -4,8 +4,6 @@ import calfem.vis_mpl as cfv
 import calfem.utils as cfu
 import calfem.core as cfc
 import numpy as np
-from collections import namedtuple
-from time import sleep
 import matplotlib.pyplot as plt
 from plantml import plantml
 from operator import itemgetter
@@ -44,6 +42,8 @@ class ClampingProblem:
         self.alpha_c = 40  # [W/(m^2K)]
         self.L = L  # [M]
 
+        # Three-point triangle element
+        self.el_type = 2
         # CALFEM specific
         self.ep = [2, self.thickness[0]]
 
@@ -86,12 +86,12 @@ class ClampingProblem:
         for xp, yp in points:
             g.point([xp, yp])
 
-        NUM = 2
+        NUM = None
 
         for s in [[0, 1]]:
             g.spline(s, marker=ClampingProblem.Y_FIXED_BOUNDARY, el_on_curve=NUM)
 
-        for s in [[1, 2], [2, 3], [3, 4], [4, 5],  # 0-4
+        for s in [[1, 2], [2, 3], [3, 4], [4, 5],
                   [5, 6], [6, 7]]:
             g.spline(s, marker=ClampingProblem.CONVECTION_BOUNDARY,
                      el_on_curve=NUM)
@@ -103,8 +103,7 @@ class ClampingProblem:
             g.spline(s, marker=ClampingProblem.CONVECTION_BOUNDARY,
                      el_on_curve=NUM)
 
-        for s in [  # 5-9
-                [10, 11], [11, 12], [12, 13], [13, 14], [14, 15],  # 10-14
+        for s in [[10, 11], [11, 12], [12, 13], [13, 14], [14, 15],
                 [15, 16], [16, 17]]:
             g.spline(s, el_on_curve=NUM)
 
@@ -128,55 +127,32 @@ class ClampingProblem:
         return g
 
     def generate_mesh(self, dof=1):
-        mesh = cfm.GmshMesh(self.geometry, 2, dof)
+        mesh = cfm.GmshMesh(self.geometry, self.el_type, dof)
         mesh.return_boundary_elements = True
+        mesh.el_size_factor = 0.02
         return mesh.create()
 
     def N_transpose(self, node_pair_list, f_sub, factor):
         # Calculates the integral N^tN over an element edge
-        for node_pair in node_pair_list:
-            r1 = None
-            r1_dof_index = None
-            r2 = None
-            r2_dof_index = None
-            for i, (coord, dof) in enumerate(zip(self.coords, self.dofs)):
-                if dof == node_pair[0]:
-                    r1 = coord
-                    r1_dof_index = i
-                if dof == node_pair[1]:
-                    r2 = coord
-                    r2_dof_index = i
+        for p1, p2 in node_pair_list:
+            r1 = self.coords[(self.dofs == p1).flatten()]
+            r2 = self.coords[(self.dofs == p2).flatten()]
+            distance = np.linalg.norm(r1 - r2)
 
-            distance = np.linalg.norm(np.array(r1) - np.array(r2))
-
-            f_sub[r1_dof_index] += factor * distance
-            f_sub[r2_dof_index] += factor * distance
+            f_sub[np.isin(self.dofs, [p1, p2])] += factor * distance
 
     def N_N_transpose(self, node_pair_list, k_sub):
         # Calculates the integral N^tN over an element
-        for node_pair in node_pair_list:
-            r1 = None
-            r1_dof_index = None
-            r2 = None
-            r2_dof_index = None
-            for i, (coord, dof) in enumerate(zip(self.coords, self.dofs)):
-                if dof == node_pair[0]:
-                    r1 = coord
-                    r1_dof_index = i
-                if dof == node_pair[1]:
-                    r2 = coord
-                    r2_dof_index = i
+        for p1, p2 in node_pair_list:
+            r1 = self.coords[(self.dofs == p1).flatten()]
+            r2 = self.coords[(self.dofs == p2).flatten()]
+            distance = np.linalg.norm(r1 - r2)
 
-            distance = np.linalg.norm(np.array(r1) - np.array(r2))
+            k_e = np.array([[1/3, 1/6],
+                            [1/6, 1/3]]) * \
+                self.alpha_c * self.thickness[0] * distance
 
-            k_sub[r1_dof_index][r1_dof_index] += 1/3 * \
-                self.alpha_c * self.thickness[0] * distance
-            k_sub[r2_dof_index][r2_dof_index] += 1/3 * \
-                self.alpha_c * self.thickness[0] * distance
-            k_sub[r1_dof_index][r2_dof_index] += 1/6 * \
-                self.alpha_c * self.thickness[0] * distance
-            k_sub[r2_dof_index][r1_dof_index] += 1/6 * \
-                self.alpha_c * self.thickness[0] * distance
+            cfc.assem(np.array([p1, p2]), k_sub, k_e)
 
     def solve_static(self, show_figure=False):
         # cfv.draw_geometry(self.geometry)
@@ -438,25 +414,49 @@ class ClampingProblem:
                       sigy-sigx*sigz+3*tauxy**2)**(1/2)
 
             von_mises.append(stress)
-
+        von_mises = np.array(von_mises)
+        von_mises2 = []
+        for node in zip(self.dofs):
+            s = np.mean(von_mises[np.any(np.isin(self.edof, node), axis=1)])
+            # print(])
+            von_mises2.append(s)
+            # print(node)
+        # von_mises = von_mises2
         magnification = 10.0
 
         cfv.figure(fig_size=(10, 10))
         
         flip_y = np.array([([1, -1]*int(a.size/2))]).T
         flip_x = np.array([([-1, 1]*int(a.size/2))]).T
-        cfv.draw_element_values(von_mises, self.coords, stress_edof, 2, 2, a,
-                                draw_elements=False, draw_undisplaced_mesh=True,
-                                title="Effective Stress", magnfac=magnification)
-        cfv.draw_element_values(von_mises, [0, self.L]+[1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y, a),
-                                draw_elements=False, draw_undisplaced_mesh=True,
-                                title="Effective Stress", magnfac=magnification)
-        cfv.draw_element_values(von_mises, [2*self.L, self.L]+[-1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y*flip_x, a),
-                                draw_elements=False, draw_undisplaced_mesh=True,
-                                title="Effective Stress", magnfac=magnification)
-        cfv.draw_element_values(von_mises, [2*self.L, 0]+[-1, 1]*self.coords, stress_edof, 2, 2, np.multiply(flip_x, a),
-                                draw_elements=False, draw_undisplaced_mesh=True,
-                                title="Effective stress and displacement", magnfac=magnification)
+        # cfv.draw_element_values(von_mises, self.coords, stress_edof, 2, 2, a,
+        #                         draw_elements=False, draw_undisplaced_mesh=True,
+        #                         title="Effective Stress", magnfac=magnification)
+        # cfv.draw_element_values(von_mises, [0, self.L]+[1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y, a),
+        #                         draw_elements=False, draw_undisplaced_mesh=True,
+        #                         title="Effective Stress", magnfac=magnification)
+        # cfv.draw_element_values(von_mises, [2*self.L, self.L]+[-1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y*flip_x, a),
+        #                         draw_elements=False, draw_undisplaced_mesh=True,
+        #                         title="Effective Stress", magnfac=magnification)
+        # cfv.draw_element_values(von_mises, [2*self.L, 0]+[-1, 1]*self.coords, stress_edof, 2, 2, np.multiply(flip_x, a),
+        #                         draw_elements=False, draw_undisplaced_mesh=True,
+        #                         title="Effective stress and displacement", magnfac=magnification)
+        
+        print(np.min(von_mises2))
+        magnfac = magnification
+        coords_list = [self.coords, [0, self.L]+[1, -1]*self.coords, [2*self.L, self.L]+[-1, -1]*self.coords, [2*self.L, 0]+[-1, 1]*self.coords]
+        # coords = self.coords
+        displacement_list = [a, np.multiply(flip_y, a), np.multiply(flip_y*flip_x, a), np.multiply(flip_x, a)]
+        for coords, displacements in zip(coords_list, displacement_list):
+            if displacements is not None:
+                if displacements.shape[1] != coords.shape[1]:
+                    displacements = np.reshape(displacements, (-1, coords.shape[1]))
+                    coords_disp = np.asarray(coords + magnfac * displacements)
+            cfv.draw_mesh(coords, self.edof, 1, self.el_type, color=(0, 0, 0, 0.1))
+            cfv.draw_nodal_values_shaded(von_mises2, coords_disp, self.edof, title=(f"Max temp {np.amax(von_mises):.2f} (C)"),
+                                    dofs_per_node=1, el_type=2, draw_elements=False)
+            
+            cfv.draw_mesh(coords_disp, self.edof, 1, self.el_type, color=(0, 1, 0, 0.1))
+
         cfv.colorbar()
         plt.xlabel("x (m)")
         plt.ylabel("y (m)")
