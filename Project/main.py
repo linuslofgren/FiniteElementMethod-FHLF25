@@ -1,5 +1,4 @@
-import calfem.geometry as cfg
-import calfem.mesh as cfm
+
 import calfem.vis_mpl as cfv
 import calfem.utils as cfu
 import calfem.core as cfc
@@ -7,132 +6,62 @@ import numpy as np
 import matplotlib.pyplot as plt
 from plantml import plantml
 from operator import itemgetter
+from geometry import gripper_mesh, ClampingBoundaryKeys, ClampingMaterialKeys
 
 
 class IsomorphicMaterial:
-    def __init__(self, k, E, v, alpha, name=None) -> None:
-        self.k = k  # [W/(mK)]
+    """Defines an isomorphic material
+    k: Thermal conductivity [W/(mK)]
+    E: Young's modulus [Pa]
+    v: Poisson's ratio
+    alpha: expansion coefficient [1/K]
+    density: [kg/m^3]
+    spec_heat: [J/(kg K)]
+    name: optional material name
+    """
+    def __init__(self, k, E, v, alpha, density, spec_heat, name=None) -> None:
+        self.k = k 
         self.D = np.diag([k, k])
-        self.E = E  # [Pa]
+        self.E = E
         self.v = v
         self.alpha = alpha
+        self.density = density
+        self.spec_heat = spec_heat
         self.name = name
+
+
 
 
 class ClampingProblem:
 
-    COPPER = 1
-    NYLON = 2
-
-    HEAT_FLUX_BOUNDARY = 6
-    CONVECTION_BOUNDARY = 8
-    FIXED_BOUNDARY = 10
-    X_FIXED_BOUNDARY = 11
-    Y_FIXED_BOUNDARY = 12
-
-    def __init__(self, L=0.005) -> None:
+    def __init__(self) -> None:
         self.materials = {
-            ClampingProblem.COPPER: IsomorphicMaterial(385, 128e9, 0.36, 17.6e-6, "Copper"),
-            ClampingProblem.NYLON: IsomorphicMaterial(0.26, 3e9, 0.39, 80e-6, "Nylon")
+            ClampingMaterialKeys.COPPER: IsomorphicMaterial(385, 128e9, 0.36, 17.6e-6, 8930, 386, "Copper"),
+            ClampingMaterialKeys.NYLON: IsomorphicMaterial(0.26, 3e9, 0.39, 80e-6, 1100, 1500, "Nylon")
         }
+
         self.T_inf = 18  # [C]
         self.T_0 = 18 # [C]
+
+        # Thermal load
         self.h = -1e5  # [W/m**2]
-        self.thickness = [0.005]  # [m]
+
+        # Convection constant
         self.alpha_c = 40  # [W/(m^2K)]
-        self.L = L  # [M]
 
         # Three-point triangle element
         self.el_type = 2
+
+        self.thickness = [0.005]  # [m]
+        self.L = 0.005  # [M]
+        self.coords, self.edof, self.dofs, self.bdofs, self.element_markers, self.boundary_elements = gripper_mesh(self.L, self.el_type, 1)
+        print(self.element_markers)
+        self.ex, self.ey = cfc.coord_extract(self.edof, self.coords, self.dofs)
+
         # CALFEM specific
         self.ep = [2, self.thickness[0]]
 
-        self.geometry = self.define_geometry()
-        self.coords, self.edof, self.dofs, self.bdofs, self.element_markers, self.boundary_elements = self.generate_mesh()
-
-    def define_geometry(self):
-        a = 0.1*self.L
-        b = 0.1*self.L
-        c = 0.3*self.L
-        d = 0.05*self.L
-        h = 0.15*self.L
-        t = 0.05*self.L
-
-        g = cfg.geometry()
-
-        points = [
-            [0, 0.5*self.L],
-            [a, 0.5*self.L],
-            [a, 0.5*self.L-b],
-            [a+c, 0.5*self.L-b],
-            [a+c+d, 0.5*self.L-b-d],  # 0-4
-            [a+c+d, d],
-            [self.L-2*d, 0.3*self.L],
-            [self.L, 0.3*self.L],
-            [self.L, 0.3*self.L-d],
-            [self.L-2*d, 0.3*self.L-d],  # 5-9
-            [a+c+d, 0],
-            [c+d, 0],
-            [c+d, 0.5*self.L-b-a],
-            [a+t, 0.5*self.L-b-a],
-            [a+t, 0.5*self.L-b-a-h],  # 10-14
-            [a, 0.5*self.L-b-a-h],
-            [a, 0.5*self.L-b-a],
-            [0, 0.5*self.L-b-a],
-            [0, 0.5*self.L-b],
-            [0, 0]  # 15-19
-        ]
-
-        for xp, yp in points:
-            g.point([xp, yp])
-
-        NUM = None
-
-        for s in [[0, 1]]:
-            g.spline(s, marker=ClampingProblem.Y_FIXED_BOUNDARY, el_on_curve=NUM)
-
-        for s in [[1, 2], [2, 3], [3, 4], [4, 5],
-                  [5, 6], [6, 7]]:
-            g.spline(s, marker=ClampingProblem.CONVECTION_BOUNDARY,
-                     el_on_curve=NUM)
-
-        for s in [[7, 8]]:
-            g.spline(s, marker=ClampingProblem.X_FIXED_BOUNDARY, el_on_curve=NUM)
-
-        for s in [[8, 9], [9, 10]]:
-            g.spline(s, marker=ClampingProblem.CONVECTION_BOUNDARY,
-                     el_on_curve=NUM)
-
-        for s in [[10, 11], [11, 12], [12, 13], [13, 14], [14, 15],
-                [15, 16], [16, 17]]:
-            g.spline(s, el_on_curve=NUM)
-
-        for s in [[17, 18]]:
-            g.spline(s, marker=ClampingProblem.FIXED_BOUNDARY, el_on_curve=NUM)
-
-        for s in [[18, 0]]:
-            g.spline(s, marker=ClampingProblem.HEAT_FLUX_BOUNDARY,
-                     el_on_curve=NUM)
-
-        for s in [[17, 19]]:
-            g.spline(s, marker=ClampingProblem.FIXED_BOUNDARY, el_on_curve=NUM)
-
-        for s in [[19, 11]]:
-            g.spline(s, el_on_curve=NUM)
-
-        g.surface(list(range(0, 19)), marker=ClampingProblem.COPPER)
-        g.surface(list(set(range(11, 21)) - set([17, 18])),
-                  marker=ClampingProblem.NYLON)
-
-        return g
-
-    def generate_mesh(self, dof=1):
-        mesh = cfm.GmshMesh(self.geometry, self.el_type, dof)
-        mesh.return_boundary_elements = True
-        mesh.el_size_factor = 0.02
-        return mesh.create()
-
-    def N_transpose(self, node_pair_list, f_sub, factor):
+    def integrate_boundary_load(self, node_pair_list, f_sub, factor):
         # Calculates the integral N^tN over an element edge
         for p1, p2 in node_pair_list:
             r1 = self.coords[(self.dofs == p1).flatten()]
@@ -141,7 +70,7 @@ class ClampingProblem:
 
             f_sub[np.isin(self.dofs, [p1, p2])] += factor * distance
 
-    def N_N_transpose(self, node_pair_list, k_sub):
+    def integrate_boundary_convection(self, node_pair_list, k_sub):
         # Calculates the integral N^tN over an element
         for p1, p2 in node_pair_list:
             r1 = self.coords[(self.dofs == p1).flatten()]
@@ -161,10 +90,10 @@ class ClampingProblem:
             plt.ylabel("y (m)")
             cfv.draw_mesh(self.coords, self.edof, 1, 2)
 
-        ex, ey = cfc.coord_extract(self.edof, self.coords, self.dofs)
+        
 
         K = np.zeros((np.size(self.dofs), np.size(self.dofs)))
-        for eldof, elx, ely, material_index in zip(self.edof, ex, ey, self.element_markers):
+        for eldof, elx, ely, material_index in zip(self.edof, self.ex, self.ey, self.element_markers):
             Ke = cfc.flw2te(elx, ely, self.thickness,
                             self.materials[material_index].D)
             cfc.assem(eldof, K, Ke)
@@ -172,30 +101,28 @@ class ClampingProblem:
         f = np.zeros([np.size(self.dofs), 1])
 
         # Add f_h
-        node_lists = node_lists_conv = list(map(
+        f_h_nodes = list(map(
             itemgetter("node-number-list"),
-            self.boundary_elements[ClampingProblem.HEAT_FLUX_BOUNDARY]
+            self.boundary_elements[ClampingBoundaryKeys.HEAT_FLUX_BOUNDARY]
         ))
-        self.N_transpose(node_lists, f, -self.h*self.thickness[0] * 1/2)
+        self.integrate_boundary_load(f_h_nodes, f, -self.h*self.thickness[0] * 1/2)
 
         # Add f_c
-        node_lists_conv = list(map(
+        f_c_nodes = list(map(
             itemgetter("node-number-list"),
-            self.boundary_elements[ClampingProblem.CONVECTION_BOUNDARY]
+            self.boundary_elements[ClampingBoundaryKeys.CONVECTION_BOUNDARY]
         ))
-        self.N_transpose(node_lists_conv, f, self.T_inf *
+        self.integrate_boundary_load(f_c_nodes, f, self.T_inf *
                          self.alpha_c * self.thickness[0] * 1/2)
 
-        # MARK: Sida 220
+        # Add K_c (from page 220)
         K_c = np.zeros((np.size(self.dofs), np.size(self.dofs)))
-        self.N_N_transpose(node_lists_conv, K_c)
+        self.integrate_boundary_convection(f_c_nodes, K_c)
         K += K_c
 
         a_stat = np.linalg.solve(K, f)
 
-        max_temp = np.amax(a_stat)
-
-        print(f"Maximum temperature {max_temp:.2f} (°C)")
+        print(f"Maximum temperature {np.amax(a_stat):.2f} (°C)")
 
 
         if show_figure:
@@ -231,16 +158,11 @@ class ClampingProblem:
 
         a_stat, K, f = self.solve_static()
 
-        rho_cu = 8930  # [kg/m^3]
-        rho_ny = 1100  # [kg/m^3]
-
-        c_p_cu = 386  # [J/(kgK)]
-        c_p_ny = 1500  # [J/(kgK)]
-
         C = np.zeros((np.size(self.dofs), np.size(self.dofs)))
         for eldof, elx, ely, material_index in zip(self.edof, ex, ey, self.element_markers):
-            Ce = plantml(elx, ely, (rho_cu * c_p_cu * self.thickness[0]) if material_index ==
-                         ClampingProblem.COPPER else (rho_ny * c_p_ny * self.thickness[0]))
+            rho = self.materials[material_index].density
+            c_v = self.materials[material_index].spec_heat
+            Ce = plantml(elx, ely, (rho * c_v * self.thickness[0]))
             cfc.assem(eldof, C, Ce)
 
         theta = 1.0
@@ -285,14 +207,13 @@ class ClampingProblem:
         fig, axes  = plt.subplots(3,2)
         fig.tight_layout()
         axes.flatten()[-1].axis('off')
-        # vmax = np.max(a_stat)
+
         vmax = np.max(snapshots[-1])
         for snapshot, time, ax in zip(snapshots, snapshot_time, axes.flatten()):
             plt.sca(ax)
             plt.xlabel("x (m)")
             plt.ylabel("y (m)")
             
-            # cfv.figure(fig, fig_size=(10, 10))
             cfv.draw_nodal_values_shaded(snapshot, self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
                                     dofs_per_node=1, el_type=2, draw_elements=False, vmin=self.T_0, vmax=vmax)
             cfv.draw_nodal_values_shaded(snapshot, [0, self.L]+[1, -1]*self.coords, self.edof, title=(f"Max temp {np.amax(snapshot):.2f} (C)"),
@@ -317,7 +238,7 @@ class ClampingProblem:
 
         # MARK: Del C (plane strain)
 
-        ex, ey = cfc.coord_extract(self.edof, self.coords, self.dofs)
+        
 
         if temp_values is None:
             a_stat, _, _ = self.solve_static()
@@ -342,7 +263,7 @@ class ClampingProblem:
 
         K = np.zeros((np.size(self.dofs)*2, np.size(self.dofs)*2))
 
-        for eldof, elx, ely, material_index in zip(stress_edof, ex, ey, self.element_markers):
+        for eldof, elx, ely, material_index in zip(stress_edof, self.ex, self.ey, self.element_markers):
             D = cfc.hooke(ptype, self.materials[material_index].E,
                           self.materials[material_index].v)
             Ce = cfc.plante(elx, ely, self.ep, D)
@@ -351,7 +272,7 @@ class ClampingProblem:
         f_0 = np.zeros((np.size(self.dofs)*2, 1))
 
         D_list = []
-        for eldof, temp_eldof, elx, ely, material_index in zip(stress_edof, self.edof, ex, ey, self.element_markers):
+        for eldof, temp_eldof, elx, ely, material_index in zip(stress_edof, self.edof, self.ex, self.ey, self.element_markers):
             E = self.materials[material_index].E
             v = self.materials[material_index].v
             alpha = self.materials[material_index].alpha
@@ -392,8 +313,8 @@ class ClampingProblem:
 
         ed = cfc.extract_eldisp(stress_edof, a)
 
-        von_mises = []
-        for dof, temp_edof, elx, ely, disp, _, material_index in zip(stress_edof, self.edof, ex, ey, ed, D_list, self.element_markers):
+        von_mises_element = []
+        for dof, temp_edof, elx, ely, disp, _, material_index in zip(stress_edof, self.edof, self.ex, self.ey, ed, D_list, self.element_markers):
             
             E = self.materials[material_index].E
             v = self.materials[material_index].v
@@ -413,13 +334,12 @@ class ClampingProblem:
             stress = (sigx**2+sigy**2+sigz**2-sigx *
                       sigy-sigx*sigz+3*tauxy**2)**(1/2)
 
-            von_mises.append(stress)
-        von_mises = np.array(von_mises)
-        von_mises2 = []
+            von_mises_element.append(stress)
+        von_mises_element = np.array(von_mises_element)
+        von_mises_node = []
         for node in zip(self.dofs):
-            s = np.mean(von_mises[np.any(np.isin(self.edof, node), axis=1)])
-            # print(])
-            von_mises2.append(s)
+            s = np.mean(von_mises_element[np.any(np.isin(self.edof, node), axis=1)])
+            von_mises_node.append(s)
             # print(node)
         # von_mises = von_mises2
         magnification = 10.0
@@ -428,20 +348,8 @@ class ClampingProblem:
         
         flip_y = np.array([([1, -1]*int(a.size/2))]).T
         flip_x = np.array([([-1, 1]*int(a.size/2))]).T
-        # cfv.draw_element_values(von_mises, self.coords, stress_edof, 2, 2, a,
-        #                         draw_elements=False, draw_undisplaced_mesh=True,
-        #                         title="Effective Stress", magnfac=magnification)
-        # cfv.draw_element_values(von_mises, [0, self.L]+[1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y, a),
-        #                         draw_elements=False, draw_undisplaced_mesh=True,
-        #                         title="Effective Stress", magnfac=magnification)
-        # cfv.draw_element_values(von_mises, [2*self.L, self.L]+[-1, -1]*self.coords, stress_edof, 2, 2, np.multiply(flip_y*flip_x, a),
-        #                         draw_elements=False, draw_undisplaced_mesh=True,
-        #                         title="Effective Stress", magnfac=magnification)
-        # cfv.draw_element_values(von_mises, [2*self.L, 0]+[-1, 1]*self.coords, stress_edof, 2, 2, np.multiply(flip_x, a),
-        #                         draw_elements=False, draw_undisplaced_mesh=True,
-        #                         title="Effective stress and displacement", magnfac=magnification)
         
-        print(np.min(von_mises2))
+        # print(np.min(von_mises2))
         magnfac = magnification
         coords_list = [self.coords, [0, self.L]+[1, -1]*self.coords, [2*self.L, self.L]+[-1, -1]*self.coords, [2*self.L, 0]+[-1, 1]*self.coords]
         # coords = self.coords
@@ -452,7 +360,7 @@ class ClampingProblem:
                     displacements = np.reshape(displacements, (-1, coords.shape[1]))
                     coords_disp = np.asarray(coords + magnfac * displacements)
             cfv.draw_mesh(coords, self.edof, 1, self.el_type, color=(0, 0, 0, 0.1))
-            cfv.draw_nodal_values_shaded(von_mises2, coords_disp, self.edof, title=(f"Max temp {np.amax(von_mises):.2f} (C)"),
+            cfv.draw_nodal_values_shaded(von_mises_node, coords_disp, self.edof, title=(f"Max temp {np.amax(von_mises_element):.2f} (C)"),
                                     dofs_per_node=1, el_type=2, draw_elements=False)
             
             cfv.draw_mesh(coords_disp, self.edof, 1, self.el_type, color=(0, 1, 0, 0.1))
