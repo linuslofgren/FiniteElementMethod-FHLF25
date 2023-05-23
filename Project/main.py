@@ -382,9 +382,7 @@ class ClampingProblem:
 
             D = cfc.hooke(ptype, E, v)[np.ix_([0, 1, 3], [0, 1, 3])]
             D_list.append(D)
-
-            dt = ((a_stat[temp_eldof[0]-1] + a_stat[temp_eldof[1] -
-                  1] + a_stat[temp_eldof[2]-1])/3)[0] - self.T_inf
+            dt = np.mean(a_stat[temp_eldof-1]) - self.T_0
 
             internal_force = cfc.plantf(
                 elx, ely, self.ep, D*alpha*dt@np.array([1, 1, 0]).T)
